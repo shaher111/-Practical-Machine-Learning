@@ -1,0 +1,152 @@
+---
+title: "Weightlifting Prediction"
+author: "Rebecca Kotula"
+date: "9/21/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, my goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. I will train multiple models on this data in order to determine the best model and then predict 20 test cases. 
+
+# Data Processing
+## Importing the Data
+We begin by loading the necessary libraries and downloading/reading the data into R. 
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(caret)
+library(e1071)
+library(rattle)
+library(randomForest)
+
+trainURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+if(!exists("Training Data.csv")){
+    download.file(trainURL, "Training Data.csv")
+}
+if(!exists("Testing Data.csv")){
+    download.file(testURL, "Testing Data.csv")
+}
+training <- read.csv("Training Data.csv", na.strings = c("NA",""))
+testing <- read.csv("Testing Data.csv", na.strings = c("NA",""))
+```
+
+# Data Cleaning
+Viewing a summary of the data shows us that many columns are filled with mostly 0s or NAs. We can delete columns that contain missing values since these will not be useful for out analysis. 
+```{r, results=FALSE}
+training <- training[, colSums(is.na(training)) == 0]
+testing <- testing[, colSums(is.na(testing)) == 0]
+```
+
+We can also remove the label and timestamp columns that just serve to label the data and will not be part of the analysis. 
+```{r, results=TRUE}
+trainingClean <- training[,-c(1:7)]
+testingClean <- testing[,-c(1:7)]
+```
+
+## Cross-validation/Data Splitting
+In order to cross-validate we create a training and testing set that are subsets of our original training set. 
+```{r, results=FALSE}
+set.seed(8)
+inTrain <- createDataPartition(y=trainingClean$classe, p=0.7, list=FALSE)
+train <- trainingClean[inTrain,]
+test <- trainingClean[-inTrain,]
+```
+
+# Model Building
+The data is now ready to train a model. I tried out three different types of models: classification tree, random forest, and gradient boosting. 
+
+##Classification Tree
+
+We set the seed before we begin in order to ensure reproducibility. We then can train a classification tree model on our subset of the training data. This model uses k=5, or 5 folds. 
+```{r, cache=TRUE}
+set.seed(8)
+modFit1 <- train(classe ~. , method="rpart", data=train, trControl = trainControl(method="cv", number=5))
+```
+
+This plot shows us the classification structure this model has determined. 
+```{r}
+fancyRpartPlot(modFit1$finalModel)
+```
+
+We can then use this model to predict the class of the "test" subset of our original training data. The confusion matrix for these predictions gives us the overall accuracy of our model. 
+```{r}
+pred1 <- predict(modFit1, newdata=test)
+confRpart <- confusionMatrix(test$classe, pred1)
+confRpart$overall[1]
+```
+```{r, echo=FALSE, results=FALSE}
+acc <- confRpart$overall[1]
+```
+The accuracy shown by the confusion matrix is `r acc`, which indicates that the classification tree method does not predict our outcome very well. This means that we would predict that the out-of-sample error rate to be `r 1-acc`. 
+
+
+##Random Forests
+
+We set the seed again before we begin in order to ensure reproducibility. Now we will train a random forest model.  
+```{r, cache=TRUE}
+set.seed(8)
+modFit2 <- train(classe ~. , method="rf", data=train)
+```
+
+We can then use this model to predict the class of the "test" subset of our original training data. The confusion matrix for these predictions gives us the overall accuracy of our model. 
+```{r}
+pred2 <- predict(modFit2, newdata=test)
+confRF <- confusionMatrix(test$classe, pred2)
+confRF$overall[1]
+```
+```{r, echo=FALSE, results=FALSE}
+acc2 <- confRF$overall[1]
+```
+
+The accuracy shown by the confusion matrix is `r acc2`, meaning that our random forest is a very good predictor of the class. This means that we would predict that the out-of-sample error rate to be `r 1-acc2`. So far this is the more accurate of the two models. 
+
+
+##Gradient Boosting
+
+Even though our accuracy was quite high with the random forest model, we will try one more method- gradient boosting. Again, we set the seed before we begin in order to ensure reproducibility. 
+```{r, cache=TRUE}
+set.seed(8)
+modFit3 <- train(classe ~. , method="gbm", data=train, trControl=trainControl(method="cv", number=5), verbose=FALSE)
+```
+
+Again, we use the model to predict the class of the "test" subset of our original training data. The confusion matrix for these predictions gives us the overall accuracy of our model. 
+```{r}
+pred3 <- predict(modFit3, newdata=test)
+confGB <- confusionMatrix(test$classe, pred3)
+confGB$overall[1]
+```
+```{r, echo=FALSE, results=FALSE}
+acc3 <- confGB$overall[1]
+```
+The accuracy shown by the confusion matrix is `r acc3`, meaning that our gradient boosting model is also a good predictor of the class, but does not achieve quite as high of an accuracy as the random forest model. This means that we would predict that the out-of-sample error rate as `r 1-acc3`. 
+
+## Further Exploration
+We can view summaries of each of our models to see the amount of cases they assigned to each class. It is obvious in these tables that the first model, the classification tree, had a much different outcome than the other two models. 
+```{r}
+summary(pred1)
+summary(pred2)
+summary(pred3)
+```
+
+Now that we have determined that the random forest method is the best method, it can be interesting to look at the variables' importance in the model. This shows us the top 20 variables that have the highest impact on predicting the class. 
+```{r}
+varImp(modFit2)
+```
+
+If we look at a plot of the model's accuracy determined by the number of predictors used, we see that there is a peak in the middle, but using too many predictors begins to lower the accuracy. 
+```{r}
+plot(modFit2, main="Accuracy by Number of Predictors", xlab="# of Predictors", ylab="Accuracy")
+```
+
+# Prediction
+Since it achieved the highest accuracy, we will be using the random forest model to predict our actual test cases. 
+```{r}
+preds <- predict(modFit2, newdata=testingClean)
+preds
+```
+
+These are the predicted classes of the 20 test cases. 
+
